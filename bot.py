@@ -9,7 +9,7 @@ from aiogram.filters import Command
 from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.storage.memory import MemoryStorage
-from aiogram.types import ReplyKeyboardMarkup, KeyboardButton
+from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, FSInputFile
 from dotenv import load_dotenv
 
 from google_sheets import GoogleSheetsManager
@@ -430,15 +430,19 @@ async def download_excel(message: types.Message):
             logger.error(f"Failed to create Excel file for user {message.from_user.id}")
             return
 
-        with open(file_path, 'rb') as file:
+        try:
+            # Use FSInputFile for aiogram 3.x compatibility
+            document = FSInputFile(file_path, filename="clients.xlsx")
             await bot.send_document(
                 chat_id=message.chat.id,
-                document=file,
+                document=document,
                 caption="📊 Данные клиентов"
             )
-
-        os.remove(file_path)
-        logger.info(f"User {message.from_user.id} downloaded Excel file")
+            logger.info(f"User {message.from_user.id} downloaded Excel file")
+        finally:
+            # Clean up temp file
+            if os.path.exists(file_path):
+                os.remove(file_path)
 
         await message.answer(
             "✅ Файл отправлен!",
