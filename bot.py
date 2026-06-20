@@ -39,6 +39,57 @@ bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
 
+
+class AuthorizationMiddleware(BaseMiddleware):
+    """Middleware to check user authorization."""
+
+    async def __call__(self, handler, event: types.Message, data):
+        # Skip password state - it's handled separately
+        if hasattr(event, "text") and event.text == "❌ Отмена":
+            return await handler(event, data)
+
+        # Allow /start command without authorization check
+        if hasattr(event, "text") and event.text.startswith("/start"):
+            return await handler(event, data)
+
+        # Check if user is authorized for other commands
+        user_id = event.from_user.id
+        is_authorized = await check_authorization(user_id)
+
+        if not is_authorized:
+            await event.answer(
+                "❌ Доступ запрещён.\n\n🔐 Введите пароль доступа.",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="❌ Отмена")]],
+                    resize_keyboard=True
+                )
+            )
+            logger.warning(f"Unauthorized access attempt by user {user_id}")
+            return
+
+        # Check admin access for protected commands
+        protected_commands = [
+            "➕ Добавить клиента",
+            "🔍 Найти клиента",
+            "👤 Найти агента",
+            "📊 Скачать Excel"
+        ]
+
+        if hasattr(event, "text") and event.text in protected_commands:
+            is_admin = await check_admin_access(user_id)
+            if not is_admin:
+                await event.answer("⛔ Недостаточно прав.")
+                username = event.from_user.username or event.from_user.first_name
+                await log_action(user_id, username, f"Попытка использовать команду без прав: {event.text}")
+                logger.warning(f"Admin access denied for user {user_id}")
+                return
+
+        return await handler(event, data)
+
+
+# Add middleware
+dp.message.middleware(AuthorizationMiddleware())
+
 google_sheets = GoogleSheetsManager()
 excel_generator = ExcelGenerator()
 
