@@ -33,7 +33,6 @@ if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN environment variable not set")
 
 ACCESS_PASSWORD = os.getenv('ACCESS_PASSWORD', 'password123')
-ADMIN_TELEGRAM_ID = int(os.getenv('ADMIN_TELEGRAM_ID', '0')) or None
 
 bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
 storage = MemoryStorage()
@@ -67,23 +66,6 @@ class AuthorizationMiddleware(BaseMiddleware):
             logger.warning(f"Unauthorized access attempt by user {user_id}")
             return
 
-        # Check admin access for protected commands
-        protected_commands = [
-            "➕ Добавить клиента",
-            "🔍 Найти клиента",
-            "👤 Найти агента",
-            "📊 Скачать Excel"
-        ]
-
-        if hasattr(event, "text") and event.text in protected_commands:
-            is_admin = await check_admin_access(user_id)
-            if not is_admin:
-                await event.answer("⛔ Недостаточно прав.")
-                username = event.from_user.username or event.from_user.first_name
-                await log_action(user_id, username, f"Попытка использовать команду без прав: {event.text}")
-                logger.warning(f"Admin access denied for user {user_id}")
-                return
-
         return await handler(event, data)
 
 
@@ -116,11 +98,6 @@ async def check_authorization(user_id: int) -> bool:
     except Exception as e:
         logger.error(f"Error checking authorization: {e}")
         return False
-
-
-async def check_admin_access(user_id: int) -> bool:
-    """Check if user is admin."""
-    return ADMIN_TELEGRAM_ID and user_id == ADMIN_TELEGRAM_ID
 
 
 def parse_client_data(text: str) -> tuple[bool, str, str, float, str, str]:
