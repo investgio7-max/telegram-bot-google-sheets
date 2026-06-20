@@ -363,21 +363,21 @@ async def process_user_data(message: types.Message, state: FSMContext):
         )
 
 
-@dp.message(lambda message: message.text == "🔍 Найти клиента")
-async def search_client_start(message: types.Message, state: FSMContext):
-    """Start searching for client by email."""
+@dp.message(lambda message: message.text == "🔍 Найти пользователя")
+async def search_user_start(message: types.Message, state: FSMContext):
+    """Start searching for user by email."""
     try:
         await state.set_state(ClientStates.waiting_for_search_email)
         await message.answer(
-            "📧 Введите Email клиента для поиска:",
+            "📧 Введите Email пользователя для поиска:",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text="❌ Отмена")]],
                 resize_keyboard=True
             )
         )
-        logger.info(f"User {message.from_user.id} started searching client")
+        logger.info(f"User {message.from_user.id} started searching user")
     except Exception as e:
-        logger.error(f"Error in search_client_start: {e}")
+        logger.error(f"Error in search_user_start: {e}")
         await message.answer("❌ Произошла ошибка.", reply_markup=get_main_menu())
 
 
@@ -398,24 +398,27 @@ async def process_search_email(message: types.Message, state: FSMContext):
 
         await state.clear()
 
-        await message.answer("⏳ Ищу клиента...", reply_markup=get_main_menu())
+        await message.answer("⏳ Ищу пользователя...", reply_markup=get_main_menu())
 
-        client = await google_sheets.find_client_by_email(email)
+        user_info = await google_sheets.get_user_info(email)
 
-        if client:
+        if user_info:
+            parent_info = f"\n👤 Родитель: {user_info.get('Родитель', 'нет')}" if user_info.get('Родитель') else "\n👤 Родитель: нет"
+
             await message.answer(
-                f"✅ <b>Клиент найден!</b>\n\n"
-                f"🆔 ID: {client.get('ID', 'N/A')}\n"
-                f"📅 Дата регистрации: {client.get('Дата регистрации', 'N/A')}\n"
-                f"📱 Телефон: {client.get('Телефон', 'N/A')}\n"
-                f"📧 Email: {client.get('Email', 'N/A')}\n"
-                f"📊 Процент: {client.get('Процент', 'N/A')}%",
+                f"✅ <b>Пользователь найден!</b>\n\n"
+                f"📧 Email: {user_info.get('Email', 'N/A')}\n"
+                f"📱 Телефон: {user_info.get('Телефон', 'N/A')}\n"
+                f"📊 Процент: {user_info.get('Процент', 'N/A')}%\n"
+                f"📅 Дата регистрации: {user_info.get('Дата регистрации', 'N/A')}\n"
+                f"👥 Приглашённых пользователей: {user_info.get('Количество приглашённых пользователей', 0)}"
+                f"{parent_info}",
                 reply_markup=get_main_menu()
             )
-            logger.info(f"User {message.from_user.id} found client: {email}")
+            logger.info(f"User {message.from_user.id} found user: {email}")
         else:
             await message.answer(
-                f"❌ Клиент с email <b>{email}</b> не найден.",
+                f"❌ Пользователь с email <b>{email}</b> не найден.",
                 reply_markup=get_main_menu()
             )
             logger.info(f"User {message.from_user.id} searched for non-existent email: {email}")
@@ -429,27 +432,27 @@ async def process_search_email(message: types.Message, state: FSMContext):
         )
 
 
-@dp.message(lambda message: message.text == "👤 Найти агента")
-async def search_agent_start(message: types.Message, state: FSMContext):
-    """Start searching for agent by email."""
+@dp.message(lambda message: message.text == "📊 Структура")
+async def show_structure(message: types.Message, state: FSMContext):
+    """Start showing structure by user email."""
     try:
         await state.set_state(ClientStates.waiting_for_search_agent)
         await message.answer(
-            "👤 Введите Email агента для поиска:",
+            "📊 Введите Email пользователя для просмотра его структуры:",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text="❌ Отмена")]],
                 resize_keyboard=True
             )
         )
-        logger.info(f"User {message.from_user.id} started searching agent")
+        logger.info(f"User {message.from_user.id} started viewing structure")
     except Exception as e:
-        logger.error(f"Error in search_agent_start: {e}")
+        logger.error(f"Error in show_structure: {e}")
         await message.answer("❌ Произошла ошибка.", reply_markup=get_main_menu())
 
 
 @dp.message(ClientStates.waiting_for_search_agent)
-async def process_search_agent(message: types.Message, state: FSMContext):
-    """Process search agent input."""
+async def process_show_structure(message: types.Message, state: FSMContext):
+    """Process structure request."""
     try:
         if message.text == "❌ Отмена":
             await state.clear()
@@ -464,36 +467,28 @@ async def process_search_agent(message: types.Message, state: FSMContext):
 
         await state.clear()
 
-        await message.answer("⏳ Ищу агента...", reply_markup=get_main_menu())
+        await message.answer("⏳ Строю структуру...", reply_markup=get_main_menu())
 
-        agent = await google_sheets.get_agent_info(email)
+        # Get user tree
+        tree = await google_sheets.get_user_tree(email)
 
-        if agent:
-            clients_list = agent.get('Клиенты', [])
-            clients_text = ""
-            if clients_list:
-                clients_text = "\n\n📋 <b>Клиенты агента:</b>\n"
-                for i, client in enumerate(clients_list, 1):
-                    clients_text += f"{i}. {client.get('Email')} ({client.get('Телефон')})\n"
-
+        if tree:
             await message.answer(
-                f"✅ <b>Агент найден!</b>\n\n"
-                f"👤 Email: {agent.get('Email', 'N/A')}\n"
-                f"📅 Дата регистрации: {agent.get('Дата регистрации', 'N/A')}\n"
-                f"👥 Количество клиентов: {agent.get('Количество клиентов', 0)}"
-                f"{clients_text}",
-                reply_markup=get_main_menu()
+                f"<b>📊 Структура пользователя:</b>\n\n"
+                f"<code>{tree}</code>",
+                reply_markup=get_main_menu(),
+                parse_mode=ParseMode.HTML
             )
-            logger.info(f"User {message.from_user.id} found agent: {email}")
+            logger.info(f"User {message.from_user.id} viewed structure for: {email}")
         else:
             await message.answer(
-                f"❌ Агент с email <b>{email}</b> не найден.",
+                f"❌ Пользователь с email <b>{email}</b> не найден.",
                 reply_markup=get_main_menu()
             )
-            logger.info(f"User {message.from_user.id} searched for non-existent agent: {email}")
+            logger.info(f"User {message.from_user.id} searched for non-existent user: {email}")
 
     except Exception as e:
-        logger.error(f"Error in process_search_agent: {e}")
+        logger.error(f"Error in process_show_structure: {e}")
         await state.clear()
         await message.answer(
             f"❌ Произошла ошибка: {str(e)}",

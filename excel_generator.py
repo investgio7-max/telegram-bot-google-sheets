@@ -43,7 +43,7 @@ class ExcelGenerator:
             worksheet = workbook.active
             worksheet.title = "Клиенты"
 
-            headers = ['ID', 'Дата регистрации', 'Email', 'Телефон', 'Процент', 'Роль', 'Агент']
+            headers = ['ID', 'Дата регистрации', 'Email', 'Телефон', 'Процент', 'Родитель']
             worksheet.append(headers)
 
             header_fill = PatternFill(
@@ -80,18 +80,16 @@ class ExcelGenerator:
                 email_val = row_data.get('Email', '')
                 phone_val = row_data.get('Телефон', '')
                 percentage_val = row_data.get('Процент', '')
-                role_val = row_data.get('Роль', '')
-                agent_val = row_data.get('Агент', '')
+                parent_val = row_data.get('Родитель', '')
 
                 worksheet.cell(row=row_num, column=1, value=id_val)
                 worksheet.cell(row=row_num, column=2, value=date_val)
                 worksheet.cell(row=row_num, column=3, value=email_val)
                 worksheet.cell(row=row_num, column=4, value=phone_val)
                 worksheet.cell(row=row_num, column=5, value=percentage_val)
-                worksheet.cell(row=row_num, column=6, value=role_val)
-                worksheet.cell(row=row_num, column=7, value=agent_val)
+                worksheet.cell(row=row_num, column=6, value=parent_val)
 
-                for col_num in range(1, 8):
+                for col_num in range(1, 7):
                     cell = worksheet.cell(row=row_num, column=col_num)
                     cell.border = thin_border
                     cell.alignment = Alignment(
@@ -108,8 +106,7 @@ class ExcelGenerator:
             worksheet.column_dimensions['C'].width = 25
             worksheet.column_dimensions['D'].width = 18
             worksheet.column_dimensions['E'].width = 12
-            worksheet.column_dimensions['F'].width = 12
-            worksheet.column_dimensions['G'].width = 25
+            worksheet.column_dimensions['F'].width = 25
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"clients_{timestamp}.xlsx"
