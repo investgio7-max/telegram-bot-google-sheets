@@ -40,10 +40,49 @@ excel_generator = ExcelGenerator()
 
 
 class ClientStates(StatesGroup):
-    waiting_for_phone = State()
-    waiting_for_email = State()
-    waiting_for_percentage = State()
+    waiting_for_client_data = State()
     waiting_for_search_email = State()
+
+
+def parse_client_data(text: str) -> tuple[bool, str, str, float]:
+    """
+    Parse client data from message in format:
+    email
+    phone
+    percentage
+
+    Returns:
+        Tuple of (success, email, phone, percentage)
+    """
+    lines = text.strip().split('\n')
+
+    if len(lines) != 3:
+        return False, '', '', 0.0
+
+    email = lines[0].strip()
+    phone = lines[1].strip()
+    percentage_text = lines[2].strip()
+
+    # Validate email
+    if '@' not in email or '.' not in email:
+        return False, '', '', 0.0
+
+    # Validate phone (not empty)
+    if not phone:
+        return False, '', '', 0.0
+
+    # Parse percentage - handle various formats: 3%, 3, 3.0%, 3,0%
+    try:
+        # Remove % and replace comma with dot
+        percentage_text = percentage_text.rstrip('%').replace(',', '.')
+        percentage = float(percentage_text)
+
+        if percentage < 0 or percentage > 100:
+            return False, '', '', 0.0
+
+        return True, email, phone, percentage
+    except ValueError:
+        return False, '', '', 0.0
 
 
 def get_main_menu() -> ReplyKeyboardMarkup:
@@ -97,13 +136,22 @@ async def help_command(message: types.Message):
 async def add_client_start(message: types.Message, state: FSMContext):
     """Start adding new client."""
     try:
-        await state.set_state(ClientStates.waiting_for_phone)
+        await state.set_state(ClientStates.waiting_for_client_data)
         await message.answer(
-            "📱 Введите телефон клиента:",
+            "📋 Отправьте данные в формате:\n\n"
+            "<code>email\n"
+            "телефон\n"
+            "процент</code>\n\n"
+            "<b>Пример:</b>\n"
+            "<code>user@gmail.com\n"
+            "+33 7 59 87 03 18\n"
+            "3%</code>\n\n"
+            "Процент можно указать как: 3%, 3, 3.0%, 3,0%",
             reply_markup=ReplyKeyboardMarkup(
                 keyboard=[[KeyboardButton(text="❌ Отмена")]],
                 resize_keyboard=True
-            )
+            ),
+            parse_mode=ParseMode.HTML
         )
         logger.info(f"User {message.from_user.id} started adding client")
     except Exception as e:
@@ -111,77 +159,32 @@ async def add_client_start(message: types.Message, state: FSMContext):
         await message.answer("❌ Произошла ошибка.")
 
 
-@dp.message(ClientStates.waiting_for_phone)
-async def process_phone(message: types.Message, state: FSMContext):
-    """Process phone input."""
+@dp.message(ClientStates.waiting_for_client_data)
+async def process_client_data(message: types.Message, state: FSMContext):
+    """Process client data input."""
     try:
         if message.text == "❌ Отмена":
             await state.clear()
             await message.answer("❌ Отменено.", reply_markup=get_main_menu())
             return
 
-        phone = message.text.strip()
+        # Parse input
+        success, email, phone, percentage = parse_client_data(message.text)
 
-        if not phone or len(phone) < 5:
-            await message.answer("⚠️ Пожалуйста, введите корректный телефон:")
+        if not success:
+            await message.answer(
+                "❌ Неверный формат.\n\n"
+                "Отправьте данные в формате:\n\n"
+                "<code>email\n"
+                "телефон\n"
+                "процент</code>\n\n"
+                "<b>Пример:</b>\n"
+                "<code>user@gmail.com\n"
+                "+33 7 59 87 03 18\n"
+                "3%</code>",
+                parse_mode=ParseMode.HTML
+            )
             return
-
-        await state.update_data(phone=phone)
-        await state.set_state(ClientStates.waiting_for_email)
-        await message.answer("📧 Введите email клиента:")
-        logger.info(f"User {message.from_user.id} entered phone: {phone}")
-    except Exception as e:
-        logger.error(f"Error in process_phone: {e}")
-        await message.answer("❌ Произошла ошибка при обработке телефона.")
-
-
-@dp.message(ClientStates.waiting_for_email)
-async def process_email(message: types.Message, state: FSMContext):
-    """Process email input."""
-    try:
-        if message.text == "❌ Отмена":
-            await state.clear()
-            await message.answer("❌ Отменено.", reply_markup=get_main_menu())
-            return
-
-        email = message.text.strip()
-
-        if "@" not in email or "." not in email:
-            await message.answer("⚠️ Пожалуйста, введите корректный email:")
-            return
-
-        await state.update_data(email=email)
-        await state.set_state(ClientStates.waiting_for_percentage)
-        await message.answer("📊 Введите процент (число):")
-        logger.info(f"User {message.from_user.id} entered email: {email}")
-    except Exception as e:
-        logger.error(f"Error in process_email: {e}")
-        await message.answer("❌ Произошла ошибка при обработке email.")
-
-
-@dp.message(ClientStates.waiting_for_percentage)
-async def process_percentage(message: types.Message, state: FSMContext):
-    """Process percentage input and save to Google Sheets."""
-    try:
-        if message.text == "❌ Отмена":
-            await state.clear()
-            await message.answer("❌ Отменено.", reply_markup=get_main_menu())
-            return
-
-        percentage_text = message.text.strip()
-
-        try:
-            percentage = float(percentage_text)
-            if percentage < 0 or percentage > 100:
-                await message.answer("⚠️ Процент должен быть от 0 до 100:")
-                return
-        except ValueError:
-            await message.answer("⚠️ Пожалуйста, введите число:")
-            return
-
-        data = await state.get_data()
-        phone = data['phone']
-        email = data['email']
 
         await state.clear()
 
@@ -194,14 +197,27 @@ async def process_percentage(message: types.Message, state: FSMContext):
         )
 
         if success:
-            await message.answer(
-                f"✅ <b>Клиент успешно добавлен!</b>\n\n"
-                f"📱 Телефон: {phone}\n"
-                f"📧 Email: {email}\n"
-                f"📊 Процент: {percentage}%",
-                reply_markup=get_main_menu()
-            )
-            logger.info(f"User {message.from_user.id} added client: {phone}, {email}, {percentage}%")
+            # Get the added client info
+            client = await google_sheets.find_client_by_email(email)
+            if client:
+                await message.answer(
+                    f"✅ <b>Пользователь успешно добавлен.</b>\n\n"
+                    f"🆔 ID: {client.get('ID', 'N/A')}\n"
+                    f"📧 Email: {client.get('Email', 'N/A')}\n"
+                    f"📱 Телефон: {client.get('Телефон', 'N/A')}\n"
+                    f"📊 Процент: {client.get('Процент', 'N/A')}%\n"
+                    f"📅 Дата регистрации: {client.get('Дата регистрации', 'N/A')}",
+                    reply_markup=get_main_menu()
+                )
+            else:
+                await message.answer(
+                    f"✅ <b>Пользователь успешно добавлен.</b>\n\n"
+                    f"📧 Email: {email}\n"
+                    f"📱 Телефон: {phone}\n"
+                    f"📊 Процент: {percentage}%",
+                    reply_markup=get_main_menu()
+                )
+            logger.info(f"User {message.from_user.id} added client: {email}, {phone}, {percentage}%")
         elif message_type == "exists":
             await message.answer(
                 f"⚠️ <b>Пользователь с таким Email уже зарегистрирован.</b>\n\n"
@@ -219,7 +235,7 @@ async def process_percentage(message: types.Message, state: FSMContext):
             )
             logger.error(f"Failed to add client for user {message.from_user.id}: {message_type}")
     except Exception as e:
-        logger.error(f"Error in process_percentage: {e}")
+        logger.error(f"Error in process_client_data: {e}")
         await state.clear()
         await message.answer(
             f"❌ Произошла ошибка: {str(e)}",
