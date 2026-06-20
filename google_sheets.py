@@ -79,7 +79,12 @@ class GoogleSheetsManager:
                 return False
 
             try:
-                self.worksheet = self.spreadsheet.worksheet(0)
+                # Try to get first worksheet
+                worksheets = self.spreadsheet.worksheets()
+                if not worksheets:
+                    logger.error("No worksheets found in spreadsheet")
+                    return False
+                self.worksheet = worksheets[0]
                 logger.info(f"Worksheet accessed: {self.worksheet.title}")
             except Exception as e:
                 logger.error(f"Failed to access worksheet: {str(e)}")
