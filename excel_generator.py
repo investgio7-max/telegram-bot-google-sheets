@@ -43,7 +43,7 @@ class ExcelGenerator:
             worksheet = workbook.active
             worksheet.title = "Клиенты"
 
-            headers = ['ID', 'Дата регистрации', 'Email', 'Телефон', 'Процент', 'Родитель']
+            headers = ['ID', 'Дата регистрации', 'Email', 'Телефон', 'Процент', 'Агент']
             worksheet.append(headers)
 
             header_fill = PatternFill(
@@ -80,14 +80,14 @@ class ExcelGenerator:
                 email_val = row_data.get('Email', '')
                 phone_val = row_data.get('Телефон', '')
                 percentage_val = row_data.get('Процент', '')
-                parent_val = row_data.get('Родитель', '')
+                agent_val = row_data.get('Агент', '')
 
                 worksheet.cell(row=row_num, column=1, value=id_val)
                 worksheet.cell(row=row_num, column=2, value=date_val)
                 worksheet.cell(row=row_num, column=3, value=email_val)
                 worksheet.cell(row=row_num, column=4, value=phone_val)
                 worksheet.cell(row=row_num, column=5, value=percentage_val)
-                worksheet.cell(row=row_num, column=6, value=parent_val)
+                worksheet.cell(row=row_num, column=6, value=agent_val)
 
                 for col_num in range(1, 7):
                     cell = worksheet.cell(row=row_num, column=col_num)

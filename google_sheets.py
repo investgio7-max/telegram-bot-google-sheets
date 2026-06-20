@@ -107,7 +107,7 @@ class GoogleSheetsManager:
         try:
             first_row = self.worksheet.row_values(1)
 
-            headers = ['ID', 'Дата регистрации', 'Email', 'Телефон', 'Процент', 'Родитель']
+            headers = ['ID', 'Дата регистрации', 'Email', 'Телефон', 'Процент', 'Агент']
 
             if not first_row or first_row != headers:
                 if first_row:
@@ -177,7 +177,7 @@ class GoogleSheetsManager:
         phone: str,
         email: str,
         percentage: float,
-        parent_email: str = ""
+        agent_email: str = ""
     ) -> tuple[bool, str, dict | None]:
         """
         Add new user to Google Sheets.
@@ -186,7 +186,7 @@ class GoogleSheetsManager:
             phone: Phone number
             email: Email
             percentage: Percentage value
-            parent_email: Email of parent user (optional)
+            agent_email: Email of agent user (optional)
 
         Returns:
             Tuple of (success: bool, message: str, existing_record: dict or None)
@@ -202,12 +202,12 @@ class GoogleSheetsManager:
                 logger.info(f"Email already exists: {email}")
                 return False, "exists", existing
 
-            # If parent_email specified, verify parent exists
-            if parent_email:
-                parent = await self.find_user_by_email(parent_email)
-                if not parent:
-                    logger.error(f"Parent not found: {parent_email}")
-                    return False, "parent_not_found", None
+            # If agent_email specified, verify agent exists
+            if agent_email:
+                agent = await self.find_user_by_email(agent_email)
+                if not agent:
+                    logger.error(f"Agent not found: {agent_email}")
+                    return False, "agent_not_found", None
 
             # Get next ID
             next_id = self._get_next_id()
@@ -222,31 +222,31 @@ class GoogleSheetsManager:
                 str(email),
                 str(phone),
                 str(percentage),
-                parent_email
+                agent_email
             ]
 
             self.worksheet.append_row(row_data)
 
-            logger.info(f"Added user: ID={next_id}, email={email}, parent={parent_email}")
+            logger.info(f"Added user: ID={next_id}, email={email}, agent={agent_email}")
             return True, "success", None
 
         except Exception as e:
             logger.error(f"Error adding user: {e}")
             return False, str(e), None
 
-    async def get_children(self, parent_email: str) -> list[dict]:
+    async def get_children(self, agent_email: str) -> list[dict]:
         """
-        Get all child users of a parent.
+        Get all child users of an agent.
 
         Args:
-            parent_email: Parent email
+            agent_email: Agent email
 
         Returns:
             List of child user records
         """
         try:
             all_records = await self.get_all_data()
-            children = [r for r in all_records if r.get('Родитель', '').lower() == parent_email.lower()]
+            children = [r for r in all_records if r.get('Агент', '').lower() == agent_email.lower()]
             return children
         except Exception as e:
             logger.error(f"Error getting children: {e}")
@@ -403,13 +403,13 @@ class GoogleSheetsManager:
 
     async def get_user_info(self, user_email: str) -> dict | None:
         """
-        Get user info with children count.
+        Get user info with referrals count.
 
         Args:
             user_email: User email
 
         Returns:
-            User record with children count
+            User record with referrals count
         """
         try:
             user = await self.find_user_by_email(user_email)
@@ -417,7 +417,7 @@ class GoogleSheetsManager:
                 return None
 
             children = await self.get_children(user_email)
-            user['Количество приглашённых пользователей'] = len(children)
+            user['Количество рефералов'] = len(children)
 
             return user
         except Exception as e:

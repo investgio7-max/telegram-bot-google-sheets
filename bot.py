@@ -115,10 +115,10 @@ def parse_user_data(text: str) -> tuple[bool, str, str, float, str]:
     email
     phone
     percentage
-    [parent_email]  (optional)
+    [agent_email]  (optional)
 
     Returns:
-        Tuple of (success, email, phone, percentage, parent_email)
+        Tuple of (success, email, phone, percentage, agent_email)
     """
     lines = [line.strip() for line in text.strip().split('\n') if line.strip()]
 
@@ -128,7 +128,7 @@ def parse_user_data(text: str) -> tuple[bool, str, str, float, str]:
     email = lines[0].strip()
     phone = lines[1].strip()
     percentage_text = lines[2].strip()
-    parent_email = lines[3].strip() if len(lines) == 4 else ''
+    agent_email = lines[3].strip() if len(lines) == 4 else ''
 
     # Validate email
     if '@' not in email or '.' not in email:
@@ -148,7 +148,7 @@ def parse_user_data(text: str) -> tuple[bool, str, str, float, str]:
     except ValueError:
         return False, '', '', 0.0, ''
 
-    return True, email, phone, percentage, parent_email
+    return True, email, phone, percentage, agent_email
 
 
 def get_main_menu() -> ReplyKeyboardMarkup:
@@ -296,20 +296,20 @@ async def process_user_data(message: types.Message, state: FSMContext):
             return
 
         # Parse input
-        success, email, phone, percentage, parent_email = parse_user_data(message.text)
+        success, email, phone, percentage, agent_email = parse_user_data(message.text)
 
         if not success:
             await message.answer(
                 "❌ Неверный формат.\n\n"
-                "Без родителя:\n"
+                "Без агента:\n"
                 "<code>email\n"
                 "телефон\n"
                 "процент</code>\n\n"
-                "С родителем:\n"
+                "С агентом:\n"
                 "<code>email\n"
                 "телефон\n"
                 "процент\n"
-                "email_родителя</code>",
+                "email_агента</code>",
                 parse_mode=ParseMode.HTML
             )
             return
@@ -322,14 +322,14 @@ async def process_user_data(message: types.Message, state: FSMContext):
             phone=phone,
             email=email,
             percentage=percentage,
-            parent_email=parent_email
+            agent_email=agent_email
         )
 
         if success:
             # Get the added user info
             record = await google_sheets.find_user_by_email(email)
             if record:
-                parent_info = f"\n👤 Родитель: {record.get('Родитель', 'нет')}" if record.get('Родитель') else "\n👤 Родитель: нет"
+                agent_info = f"\n👤 Агент: {record.get('Агент', 'нет')}" if record.get('Агент') else "\n👤 Агент: нет"
 
                 await message.answer(
                     f"✅ <b>Пользователь успешно добавлен.</b>\n\n"
@@ -337,7 +337,7 @@ async def process_user_data(message: types.Message, state: FSMContext):
                     f"📧 Email: {record.get('Email', 'N/A')}\n"
                     f"📱 Телефон: {record.get('Телефон', 'N/A')}\n"
                     f"📊 Процент: {record.get('Процент', 'N/A')}%"
-                    f"{parent_info}\n"
+                    f"{agent_info}\n"
                     f"📅 Дата регистрации: {record.get('Дата регистрации', 'N/A')}",
                     reply_markup=get_main_menu()
                 )
@@ -350,10 +350,10 @@ async def process_user_data(message: types.Message, state: FSMContext):
                 f"📊 Процент: {existing_record.get('Процент', 'N/A')}%",
                 reply_markup=get_main_menu()
             )
-        elif message_type == "parent_not_found":
+        elif message_type == "agent_not_found":
             await message.answer(
-                f"❌ <b>Указанный родитель не существует.</b>\n\n"
-                f"Email родителя: {parent_email}",
+                f"❌ <b>Указанный агент не существует.</b>\n\n"
+                f"Email агента: {agent_email}",
                 reply_markup=get_main_menu()
             )
         else:
@@ -412,7 +412,7 @@ async def process_search_email(message: types.Message, state: FSMContext):
         user_info = await google_sheets.get_user_info(email)
 
         if user_info:
-            parent_info = f"\n👤 Родитель: {user_info.get('Родитель', 'нет')}" if user_info.get('Родитель') else "\n👤 Родитель: нет"
+            agent_info = f"\n👤 Агент: {user_info.get('Агент', 'нет')}" if user_info.get('Агент') else "\n👤 Агент: нет"
 
             await message.answer(
                 f"✅ <b>Пользователь найден!</b>\n\n"
@@ -420,8 +420,8 @@ async def process_search_email(message: types.Message, state: FSMContext):
                 f"📱 Телефон: {user_info.get('Телефон', 'N/A')}\n"
                 f"📊 Процент: {user_info.get('Процент', 'N/A')}%\n"
                 f"📅 Дата регистрации: {user_info.get('Дата регистрации', 'N/A')}\n"
-                f"👥 Приглашённых пользователей: {user_info.get('Количество приглашённых пользователей', 0)}"
-                f"{parent_info}",
+                f"👥 Рефералов: {user_info.get('Количество рефералов', 0)}"
+                f"{agent_info}",
                 reply_markup=get_main_menu()
             )
             logger.info(f"User {message.from_user.id} found user: {email}")
