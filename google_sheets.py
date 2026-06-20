@@ -71,8 +71,19 @@ class GoogleSheetsManager:
                 logger.error("SPREADSHEET_ID environment variable not set")
                 return False
 
-            self.spreadsheet = self.client.open_by_key(self.spreadsheet_id)
-            self.worksheet = self.spreadsheet.worksheet(0)
+            try:
+                self.spreadsheet = self.client.open_by_key(self.spreadsheet_id)
+                logger.info(f"Spreadsheet opened: {self.spreadsheet.title}")
+            except Exception as e:
+                logger.error(f"Failed to open spreadsheet with ID {self.spreadsheet_id}: {str(e)}")
+                return False
+
+            try:
+                self.worksheet = self.spreadsheet.worksheet(0)
+                logger.info(f"Worksheet accessed: {self.worksheet.title}")
+            except Exception as e:
+                logger.error(f"Failed to access worksheet: {str(e)}")
+                return False
 
             self._ensure_headers()
 
@@ -83,7 +94,7 @@ class GoogleSheetsManager:
             logger.error(f"Credentials file not found: {e}")
             return False
         except Exception as e:
-            logger.error(f"Error initializing Google Sheets: {e}")
+            logger.error(f"Error initializing Google Sheets: {type(e).__name__}: {str(e)}")
             return False
 
     def _ensure_headers(self) -> None:
