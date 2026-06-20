@@ -43,6 +43,7 @@ class ClientStates(StatesGroup):
     waiting_for_phone = State()
     waiting_for_email = State()
     waiting_for_percentage = State()
+    waiting_for_search_email = State()
 
 
 def get_main_menu() -> ReplyKeyboardMarkup:
@@ -50,6 +51,7 @@ def get_main_menu() -> ReplyKeyboardMarkup:
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
             [KeyboardButton(text="➕ Добавить клиента")],
+            [KeyboardButton(text="🔍 Найти клиента")],
             [KeyboardButton(text="📊 Скачать Excel")]
         ],
         resize_keyboard=True
@@ -185,9 +187,7 @@ async def process_percentage(message: types.Message, state: FSMContext):
 
         await message.answer("⏳ Сохраняю данные...", reply_markup=get_main_menu())
 
-        date = datetime.now().strftime("%d.%m.%Y %H:%M")
-        success = await google_sheets.add_client(
-            date=date,
+        success, message_type, existing_record = await google_sheets.add_client(
             phone=phone,
             email=email,
             percentage=percentage
@@ -198,20 +198,94 @@ async def process_percentage(message: types.Message, state: FSMContext):
                 f"✅ <b>Клиент успешно добавлен!</b>\n\n"
                 f"📱 Телефон: {phone}\n"
                 f"📧 Email: {email}\n"
-                f"📊 Процент: {percentage}%\n"
-                f"📅 Дата: {date}",
+                f"📊 Процент: {percentage}%",
                 reply_markup=get_main_menu()
             )
             logger.info(f"User {message.from_user.id} added client: {phone}, {email}, {percentage}%")
+        elif message_type == "exists":
+            await message.answer(
+                f"⚠️ <b>Пользователь с таким Email уже зарегистрирован.</b>\n\n"
+                f"📅 Дата регистрации: {existing_record.get('Дата регистрации', 'N/A')}\n"
+                f"📱 Телефон: {existing_record.get('Телефон', 'N/A')}\n"
+                f"📊 Процент: {existing_record.get('Процент', 'N/A')}%",
+                reply_markup=get_main_menu()
+            )
+            logger.info(f"User {message.from_user.id} tried to add existing email: {email}")
         else:
             await message.answer(
                 "❌ Ошибка при сохранении в Google Sheets.\n"
                 "Проверьте логи и настройки доступа.",
                 reply_markup=get_main_menu()
             )
-            logger.error(f"Failed to add client for user {message.from_user.id}")
+            logger.error(f"Failed to add client for user {message.from_user.id}: {message_type}")
     except Exception as e:
         logger.error(f"Error in process_percentage: {e}")
+        await state.clear()
+        await message.answer(
+            f"❌ Произошла ошибка: {str(e)}",
+            reply_markup=get_main_menu()
+        )
+
+
+@dp.message(lambda message: message.text == "🔍 Найти клиента")
+async def search_client_start(message: types.Message, state: FSMContext):
+    """Start searching for client by email."""
+    try:
+        await state.set_state(ClientStates.waiting_for_search_email)
+        await message.answer(
+            "📧 Введите Email клиента для поиска:",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="❌ Отмена")]],
+                resize_keyboard=True
+            )
+        )
+        logger.info(f"User {message.from_user.id} started searching client")
+    except Exception as e:
+        logger.error(f"Error in search_client_start: {e}")
+        await message.answer("❌ Произошла ошибка.", reply_markup=get_main_menu())
+
+
+@dp.message(ClientStates.waiting_for_search_email)
+async def process_search_email(message: types.Message, state: FSMContext):
+    """Process search email input."""
+    try:
+        if message.text == "❌ Отмена":
+            await state.clear()
+            await message.answer("❌ Отменено.", reply_markup=get_main_menu())
+            return
+
+        email = message.text.strip()
+
+        if "@" not in email or "." not in email:
+            await message.answer("⚠️ Пожалуйста, введите корректный email:")
+            return
+
+        await state.clear()
+
+        await message.answer("⏳ Ищу клиента...", reply_markup=get_main_menu())
+
+        client = await google_sheets.find_client_by_email(email)
+
+        if client:
+            await message.answer(
+                f"✅ <b>Клиент найден!</b>\n\n"
+                f"🆔 ID: {client.get('ID', 'N/A')}\n"
+                f"📅 Дата регистрации: {client.get('Дата регистрации', 'N/A')}\n"
+                f"📱 Телефон: {client.get('Телефон', 'N/A')}\n"
+                f"📧 Email: {client.get('Email', 'N/A')}\n"
+                f"📊 Процент: {client.get('Процент', 'N/A')}%",
+                reply_markup=get_main_menu()
+            )
+            logger.info(f"User {message.from_user.id} found client: {email}")
+        else:
+            await message.answer(
+                f"❌ Клиент с email <b>{email}</b> не найден.",
+                reply_markup=get_main_menu()
+            )
+            logger.info(f"User {message.from_user.id} searched for non-existent email: {email}")
+
+    except Exception as e:
+        logger.error(f"Error in process_search_email: {e}")
         await state.clear()
         await message.answer(
             f"❌ Произошла ошибка: {str(e)}",

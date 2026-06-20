@@ -107,7 +107,7 @@ class GoogleSheetsManager:
         try:
             first_row = self.worksheet.row_values(1)
 
-            headers = ['Дата', 'Телефон', 'Email', 'Процент']
+            headers = ['ID', 'Дата регистрации', 'Телефон', 'Email', 'Процент']
 
             if not first_row or first_row != headers:
                 if first_row:
@@ -119,31 +119,92 @@ class GoogleSheetsManager:
         except Exception as e:
             logger.error(f"Error ensuring headers: {e}")
 
+    def _get_next_id(self) -> int:
+        """Get next ID for new client."""
+        try:
+            all_records = self.worksheet.get_all_records()
+            if not all_records:
+                return 1
+
+            # Get all IDs and find max
+            ids = []
+            for record in all_records:
+                try:
+                    id_val = int(record.get('ID', 0))
+                    ids.append(id_val)
+                except (ValueError, TypeError):
+                    pass
+
+            return max(ids) + 1 if ids else 1
+        except Exception as e:
+            logger.error(f"Error getting next ID: {e}")
+            return 1
+
+    async def email_exists(self, email: str) -> dict | None:
+        """
+        Check if email already exists (case-insensitive).
+
+        Args:
+            email: Client email to check
+
+        Returns:
+            Dictionary with client data if exists, None otherwise
+        """
+        try:
+            if not self.worksheet:
+                logger.error("Worksheet not initialized")
+                return None
+
+            all_records = await self.get_all_data()
+
+            email_lower = email.lower()
+            for record in all_records:
+                if record.get('Email', '').lower() == email_lower:
+                    return record
+
+            return None
+
+        except Exception as e:
+            logger.error(f"Error checking email: {e}")
+            return None
+
     async def add_client(
         self,
-        date: str,
         phone: str,
         email: str,
         percentage: float
-    ) -> bool:
+    ) -> tuple[bool, str, dict | None]:
         """
         Add new client to Google Sheets.
 
         Args:
-            date: Date in format DD.MM.YYYY HH:MM
             phone: Client phone number
             email: Client email
             percentage: Percentage value
 
         Returns:
-            True if successful, False otherwise
+            Tuple of (success: bool, message: str, existing_record: dict or None)
         """
         try:
             if not self.worksheet:
                 logger.error("Worksheet not initialized")
-                return False
+                return False, "Worksheet not initialized", None
+
+            # Check if email already exists
+            existing = await self.email_exists(email)
+            if existing:
+                logger.info(f"Email already exists: {email}")
+                return False, "exists", existing
+
+            # Get next ID
+            next_id = self._get_next_id()
+
+            # Get current date and time
+            from datetime import datetime
+            date = datetime.now().strftime("%d.%m.%Y %H:%M")
 
             row_data = [
+                next_id,
                 date,
                 str(phone),
                 str(email),
@@ -152,12 +213,28 @@ class GoogleSheetsManager:
 
             self.worksheet.append_row(row_data)
 
-            logger.info(f"Client added: {phone}, {email}, {percentage}%")
-            return True
+            logger.info(f"Client added: ID={next_id}, {phone}, {email}, {percentage}%")
+            return True, "success", None
 
         except Exception as e:
             logger.error(f"Error adding client: {e}")
-            return False
+            return False, str(e), None
+
+    async def find_client_by_email(self, email: str) -> dict | None:
+        """
+        Find client by email (case-insensitive).
+
+        Args:
+            email: Client email to search
+
+        Returns:
+            Dictionary with client data or None
+        """
+        try:
+            return await self.email_exists(email)
+        except Exception as e:
+            logger.error(f"Error finding client: {e}")
+            return None
 
     async def get_all_data(self) -> List[Dict[str, str]]:
         """

@@ -43,7 +43,7 @@ class ExcelGenerator:
             worksheet = workbook.active
             worksheet.title = "Клиенты"
 
-            headers = ['Дата', 'Телефон', 'Email', 'Процент']
+            headers = ['ID', 'Дата регистрации', 'Телефон', 'Email', 'Процент']
             worksheet.append(headers)
 
             header_fill = PatternFill(
@@ -97,10 +97,11 @@ class ExcelGenerator:
             for header_cell in worksheet[1]:
                 header_cell.border = thin_border
 
-            worksheet.column_dimensions['A'].width = 18
+            worksheet.column_dimensions['A'].width = 8
             worksheet.column_dimensions['B'].width = 18
-            worksheet.column_dimensions['C'].width = 25
-            worksheet.column_dimensions['D'].width = 12
+            worksheet.column_dimensions['C'].width = 18
+            worksheet.column_dimensions['D'].width = 25
+            worksheet.column_dimensions['E'].width = 12
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"clients_{timestamp}.xlsx"
