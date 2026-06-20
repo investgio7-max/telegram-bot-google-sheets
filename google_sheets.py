@@ -159,7 +159,11 @@ class GoogleSheetsManager:
 
             email_lower = email.lower()
             for record in all_records:
-                if record.get('Email', '').lower() == email_lower:
+                record_email = record.get('Email', '')
+                # Convert to string if not already
+                if isinstance(record_email, (int, float)):
+                    record_email = str(record_email)
+                if str(record_email).lower() == email_lower:
                     return record
 
             return None
