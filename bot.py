@@ -505,7 +505,7 @@ async def process_show_structure(message: types.Message, state: FSMContext):
         )
 
 
-@dp.message(lambda message: message.text == "📊 Скачать Excel")
+@dp.message(lambda message: message.text == "📥 Скачать Excel")
 async def download_excel(message: types.Message):
     """Download data as Excel file."""
     try:
