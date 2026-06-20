@@ -259,6 +259,124 @@ class GoogleSheetsManager:
             logger.error(f"Error getting agent clients: {e}")
             return []
 
+    async def add_log(self, telegram_id: int, username: str, action: str) -> bool:
+        """
+        Add log entry to Logs sheet.
+
+        Args:
+            telegram_id: Telegram user ID
+            username: Telegram username
+            action: Action description
+
+        Returns:
+            True if successful
+        """
+        try:
+            from datetime import datetime
+
+            # Get or create Logs worksheet
+            worksheets = self.spreadsheet.worksheets()
+            logs_sheet = None
+
+            for ws in worksheets:
+                if ws.title == "Logs":
+                    logs_sheet = ws
+                    break
+
+            if not logs_sheet:
+                logs_sheet = self.spreadsheet.add_worksheet("Logs", rows=1000, cols=4)
+                # Add headers
+                logs_sheet.insert_row(['Дата', 'Telegram ID', 'Имя пользователя', 'Действие'], index=1)
+
+            # Add log entry
+            date = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+            logs_sheet.append_row([date, telegram_id, username, action])
+
+            logger.info(f"Log added: {telegram_id} ({username}) - {action}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error adding log: {e}")
+            return False
+
+    async def is_user_authorized(self, telegram_id: int) -> bool:
+        """
+        Check if user is authorized.
+
+        Args:
+            telegram_id: Telegram user ID
+
+        Returns:
+            True if authorized
+        """
+        try:
+            worksheets = self.spreadsheet.worksheets()
+            users_sheet = None
+
+            for ws in worksheets:
+                if ws.title == "Users":
+                    users_sheet = ws
+                    break
+
+            if not users_sheet:
+                return False
+
+            records = users_sheet.get_all_records()
+            for record in records:
+                if int(record.get('Telegram ID', 0)) == telegram_id:
+                    return True
+
+            return False
+
+        except Exception as e:
+            logger.error(f"Error checking authorization: {e}")
+            return False
+
+    async def add_authorized_user(self, telegram_id: int, username: str) -> bool:
+        """
+        Add authorized user.
+
+        Args:
+            telegram_id: Telegram user ID
+            username: Telegram username
+
+        Returns:
+            True if successful
+        """
+        try:
+            from datetime import datetime
+
+            worksheets = self.spreadsheet.worksheets()
+            users_sheet = None
+
+            for ws in worksheets:
+                if ws.title == "Users":
+                    users_sheet = ws
+                    break
+
+            if not users_sheet:
+                users_sheet = self.spreadsheet.add_worksheet("Users", rows=1000, cols=3)
+                # Add headers
+                users_sheet.insert_row(['Telegram ID', 'Имя пользователя', 'Дата авторизации'], index=1)
+
+            # Check if already authorized
+            records = users_sheet.get_all_records()
+            for record in records:
+                if int(record.get('Telegram ID', 0)) == telegram_id:
+                    logger.info(f"User already authorized: {telegram_id}")
+                    return True
+
+            # Add new user
+            date = datetime.now().strftime("%d.%m.%Y %H:%M:%S")
+            users_sheet.append_row([telegram_id, username, date])
+
+            logger.info(f"User authorized: {telegram_id} ({username})")
+            return True
+
+        except Exception as e:
+            logger.error(f"Error adding authorized user: {e}")
+            return False
+
     async def get_agent_info(self, agent_email: str) -> dict | None:
         """
         Get agent info with clients count.

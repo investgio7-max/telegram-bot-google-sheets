@@ -10,6 +10,7 @@ from aiogram.fsm.context import FSMContext
 from aiogram.fsm.state import StatesGroup, State
 from aiogram.fsm.storage.memory import MemoryStorage
 from aiogram.types import ReplyKeyboardMarkup, KeyboardButton, FSInputFile
+from aiogram.dispatcher.middlewares.base import BaseMiddleware
 from dotenv import load_dotenv
 
 from google_sheets import GoogleSheetsManager
@@ -31,6 +32,9 @@ BOT_TOKEN = os.getenv('BOT_TOKEN')
 if not BOT_TOKEN:
     raise ValueError("BOT_TOKEN environment variable not set")
 
+ACCESS_PASSWORD = os.getenv('ACCESS_PASSWORD', 'password123')
+ADMIN_TELEGRAM_ID = int(os.getenv('ADMIN_TELEGRAM_ID', '0')) or None
+
 bot = Bot(token=BOT_TOKEN, parse_mode=ParseMode.HTML)
 storage = MemoryStorage()
 dp = Dispatcher(storage=storage)
@@ -40,9 +44,32 @@ excel_generator = ExcelGenerator()
 
 
 class ClientStates(StatesGroup):
+    waiting_for_password = State()
     waiting_for_client_data = State()
     waiting_for_search_email = State()
     waiting_for_search_agent = State()
+
+
+async def log_action(user_id: int, username: str, action: str) -> None:
+    """Log user action."""
+    try:
+        await google_sheets.add_log(user_id, username or "unknown", action)
+    except Exception as e:
+        logger.error(f"Error logging action: {e}")
+
+
+async def check_authorization(user_id: int) -> bool:
+    """Check if user is authorized."""
+    try:
+        return await google_sheets.is_user_authorized(user_id)
+    except Exception as e:
+        logger.error(f"Error checking authorization: {e}")
+        return False
+
+
+async def check_admin_access(user_id: int) -> bool:
+    """Check if user is admin."""
+    return ADMIN_TELEGRAM_ID and user_id == ADMIN_TELEGRAM_ID
 
 
 def parse_client_data(text: str) -> tuple[bool, str, str, float, str, str]:
@@ -111,18 +138,72 @@ def get_main_menu() -> ReplyKeyboardMarkup:
 
 
 @dp.message(Command("start"))
-async def start_command(message: types.Message):
+async def start_command(message: types.Message, state: FSMContext):
     """Handle /start command."""
     try:
-        await message.answer(
-            "👋 Добро пожаловать!\n\n"
-            "Выберите действие:",
-            reply_markup=get_main_menu()
-        )
-        logger.info(f"User {message.from_user.id} started bot")
+        user_id = message.from_user.id
+        username = message.from_user.username or message.from_user.first_name
+
+        # Check if user is authorized
+        is_authorized = await check_authorization(user_id)
+
+        if is_authorized:
+            await message.answer(
+                "👋 Добро пожаловать!\n\n"
+                "Выберите действие:",
+                reply_markup=get_main_menu()
+            )
+            await log_action(user_id, username, "Вход в систему")
+            logger.info(f"User {user_id} started bot (authorized)")
+        else:
+            # Request password
+            await state.set_state(ClientStates.waiting_for_password)
+            await message.answer(
+                "🔐 Введите пароль доступа.",
+                reply_markup=ReplyKeyboardMarkup(
+                    keyboard=[[KeyboardButton(text="❌ Отмена")]],
+                    resize_keyboard=True
+                )
+            )
+            logger.info(f"User {user_id} requires password")
+
     except Exception as e:
         logger.error(f"Error in start_command: {e}")
         await message.answer("❌ Произошла ошибка. Попробуйте позже.")
+
+
+@dp.message(ClientStates.waiting_for_password)
+async def process_password(message: types.Message, state: FSMContext):
+    """Process password input."""
+    try:
+        if message.text == "❌ Отмена":
+            await state.clear()
+            await message.answer("❌ Отменено.")
+            return
+
+        if message.text == ACCESS_PASSWORD:
+            user_id = message.from_user.id
+            username = message.from_user.username or message.from_user.first_name
+
+            # Add user to authorized list
+            await google_sheets.add_authorized_user(user_id, username)
+            await state.clear()
+
+            await message.answer(
+                "✅ Доступ разрешён!\n\n"
+                "Добро пожаловать!\n\n"
+                "Выберите действие:",
+                reply_markup=get_main_menu()
+            )
+            await log_action(user_id, username, "Успешная авторизация")
+            logger.info(f"User {user_id} authorized successfully")
+        else:
+            await message.answer("❌ Неверный пароль. Попробуйте снова.\n\n🔐 Введите пароль доступа.")
+            logger.warning(f"Failed authorization attempt for user {message.from_user.id}")
+
+    except Exception as e:
+        logger.error(f"Error in process_password: {e}")
+        await message.answer("❌ Произошла ошибка.")
 
 
 @dp.message(Command("help"))
