@@ -43,7 +43,7 @@ class ExcelGenerator:
             worksheet = workbook.active
             worksheet.title = "Клиенты"
 
-            headers = ['ID', 'Дата регистрации', 'Телефон', 'Email', 'Процент']
+            headers = ['ID', 'Дата регистрации', 'Email', 'Телефон', 'Процент', 'Роль', 'Агент']
             worksheet.append(headers)
 
             header_fill = PatternFill(
@@ -99,9 +99,11 @@ class ExcelGenerator:
 
             worksheet.column_dimensions['A'].width = 8
             worksheet.column_dimensions['B'].width = 18
-            worksheet.column_dimensions['C'].width = 18
-            worksheet.column_dimensions['D'].width = 25
+            worksheet.column_dimensions['C'].width = 25
+            worksheet.column_dimensions['D'].width = 18
             worksheet.column_dimensions['E'].width = 12
+            worksheet.column_dimensions['F'].width = 12
+            worksheet.column_dimensions['G'].width = 25
 
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
             filename = f"clients_{timestamp}.xlsx"

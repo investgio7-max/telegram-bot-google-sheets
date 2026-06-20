@@ -42,47 +42,58 @@ excel_generator = ExcelGenerator()
 class ClientStates(StatesGroup):
     waiting_for_client_data = State()
     waiting_for_search_email = State()
+    waiting_for_search_agent = State()
 
 
-def parse_client_data(text: str) -> tuple[bool, str, str, float]:
+def parse_client_data(text: str) -> tuple[bool, str, str, float, str, str]:
     """
-    Parse client data from message in format:
+    Parse client/agent data from message in format:
     email
     phone
     percentage
+    [agent_email]  (optional - if present, it's a client with agent, else it's an agent)
 
     Returns:
-        Tuple of (success, email, phone, percentage)
+        Tuple of (success, email, phone, percentage, role, agent_email)
     """
-    lines = text.strip().split('\n')
+    lines = [line.strip() for line in text.strip().split('\n') if line.strip()]
 
-    if len(lines) != 3:
-        return False, '', '', 0.0
+    if len(lines) < 3 or len(lines) > 4:
+        return False, '', '', 0.0, '', ''
 
     email = lines[0].strip()
     phone = lines[1].strip()
     percentage_text = lines[2].strip()
+    agent_email = lines[3].strip() if len(lines) == 4 else ''
 
     # Validate email
     if '@' not in email or '.' not in email:
-        return False, '', '', 0.0
+        return False, '', '', 0.0, '', ''
 
     # Validate phone (not empty)
     if not phone:
-        return False, '', '', 0.0
+        return False, '', '', 0.0, '', ''
 
     # Parse percentage - handle various formats: 3%, 3, 3.0%, 3,0%
     try:
-        # Remove % and replace comma with dot
         percentage_text = percentage_text.rstrip('%').replace(',', '.')
         percentage = float(percentage_text)
 
         if percentage < 0 or percentage > 100:
-            return False, '', '', 0.0
-
-        return True, email, phone, percentage
+            return False, '', '', 0.0, '', ''
     except ValueError:
-        return False, '', '', 0.0
+        return False, '', '', 0.0, '', ''
+
+    # Determine role
+    if agent_email == 'agent':
+        # This is an agent
+        role = 'Агент'
+        agent_email = ''
+    else:
+        # This is a client
+        role = 'Клиент'
+
+    return True, email, phone, percentage, role, agent_email
 
 
 def get_main_menu() -> ReplyKeyboardMarkup:
@@ -91,6 +102,7 @@ def get_main_menu() -> ReplyKeyboardMarkup:
         keyboard=[
             [KeyboardButton(text="➕ Добавить клиента")],
             [KeyboardButton(text="🔍 Найти клиента")],
+            [KeyboardButton(text="👤 Найти агента")],
             [KeyboardButton(text="📊 Скачать Excel")]
         ],
         resize_keyboard=True
@@ -161,7 +173,7 @@ async def add_client_start(message: types.Message, state: FSMContext):
 
 @dp.message(ClientStates.waiting_for_client_data)
 async def process_client_data(message: types.Message, state: FSMContext):
-    """Process client data input."""
+    """Process client/agent data input."""
     try:
         if message.text == "❌ Отмена":
             await state.clear()
@@ -169,19 +181,21 @@ async def process_client_data(message: types.Message, state: FSMContext):
             return
 
         # Parse input
-        success, email, phone, percentage = parse_client_data(message.text)
+        success, email, phone, percentage, role, agent_email = parse_client_data(message.text)
 
         if not success:
             await message.answer(
                 "❌ Неверный формат.\n\n"
-                "Отправьте данные в формате:\n\n"
+                "Для <b>агента</b>:\n"
                 "<code>email\n"
                 "телефон\n"
-                "процент</code>\n\n"
-                "<b>Пример:</b>\n"
-                "<code>user@gmail.com\n"
-                "+33 7 59 87 03 18\n"
-                "3%</code>",
+                "процент\n"
+                "agent</code>\n\n"
+                "Для <b>клиента</b>:\n"
+                "<code>email\n"
+                "телефон\n"
+                "процент\n"
+                "email_агента</code>",
                 parse_mode=ParseMode.HTML
             )
             return
@@ -193,47 +207,56 @@ async def process_client_data(message: types.Message, state: FSMContext):
         success, message_type, existing_record = await google_sheets.add_client(
             phone=phone,
             email=email,
-            percentage=percentage
+            percentage=percentage,
+            role=role,
+            agent_email=agent_email
         )
 
         if success:
-            # Get the added client info
-            client = await google_sheets.find_client_by_email(email)
-            if client:
+            # Get the added record info
+            record = await google_sheets.find_client_by_email(email)
+            if record:
+                role_text = "Агент" if record.get('Роль') == 'Агент' else "Клиент"
+                agent_info = f"\n👤 Агент: {record.get('Агент', 'N/A')}" if record.get('Агент') else ""
+
                 await message.answer(
-                    f"✅ <b>Пользователь успешно добавлен.</b>\n\n"
-                    f"🆔 ID: {client.get('ID', 'N/A')}\n"
-                    f"📧 Email: {client.get('Email', 'N/A')}\n"
-                    f"📱 Телефон: {client.get('Телефон', 'N/A')}\n"
-                    f"📊 Процент: {client.get('Процент', 'N/A')}%\n"
-                    f"📅 Дата регистрации: {client.get('Дата регистрации', 'N/A')}",
+                    f"✅ <b>{role_text} успешно добавлен.</b>\n\n"
+                    f"🆔 ID: {record.get('ID', 'N/A')}\n"
+                    f"📧 Email: {record.get('Email', 'N/A')}\n"
+                    f"📱 Телефон: {record.get('Телефон', 'N/A')}\n"
+                    f"📊 Процент: {record.get('Процент', 'N/A')}%"
+                    f"{agent_info}\n"
+                    f"📅 Дата регистрации: {record.get('Дата регистрации', 'N/A')}",
                     reply_markup=get_main_menu()
                 )
-            else:
-                await message.answer(
-                    f"✅ <b>Пользователь успешно добавлен.</b>\n\n"
-                    f"📧 Email: {email}\n"
-                    f"📱 Телефон: {phone}\n"
-                    f"📊 Процент: {percentage}%",
-                    reply_markup=get_main_menu()
-                )
-            logger.info(f"User {message.from_user.id} added client: {email}, {phone}, {percentage}%")
+            logger.info(f"User {message.from_user.id} added {role}: {email}")
         elif message_type == "exists":
             await message.answer(
-                f"⚠️ <b>Пользователь с таким Email уже зарегистрирован.</b>\n\n"
+                f"⚠️ <b>Email уже зарегистрирован.</b>\n\n"
                 f"📅 Дата регистрации: {existing_record.get('Дата регистрации', 'N/A')}\n"
                 f"📱 Телефон: {existing_record.get('Телефон', 'N/A')}\n"
                 f"📊 Процент: {existing_record.get('Процент', 'N/A')}%",
                 reply_markup=get_main_menu()
             )
-            logger.info(f"User {message.from_user.id} tried to add existing email: {email}")
+        elif message_type == "agent_not_found":
+            await message.answer(
+                f"❌ <b>Указанный агент не существует.</b>\n\n"
+                f"Email агента: {agent_email}",
+                reply_markup=get_main_menu()
+            )
+        elif message_type == "not_an_agent":
+            await message.answer(
+                f"❌ <b>Указанный email не является агентом.</b>\n\n"
+                f"Email: {agent_email}",
+                reply_markup=get_main_menu()
+            )
         else:
             await message.answer(
                 "❌ Ошибка при сохранении в Google Sheets.\n"
-                "Проверьте логи и настройки доступа.",
+                f"Детали: {message_type}",
                 reply_markup=get_main_menu()
             )
-            logger.error(f"Failed to add client for user {message.from_user.id}: {message_type}")
+            logger.error(f"Failed to add for user {message.from_user.id}: {message_type}")
     except Exception as e:
         logger.error(f"Error in process_client_data: {e}")
         await state.clear()
@@ -302,6 +325,78 @@ async def process_search_email(message: types.Message, state: FSMContext):
 
     except Exception as e:
         logger.error(f"Error in process_search_email: {e}")
+        await state.clear()
+        await message.answer(
+            f"❌ Произошла ошибка: {str(e)}",
+            reply_markup=get_main_menu()
+        )
+
+
+@dp.message(lambda message: message.text == "👤 Найти агента")
+async def search_agent_start(message: types.Message, state: FSMContext):
+    """Start searching for agent by email."""
+    try:
+        await state.set_state(ClientStates.waiting_for_search_agent)
+        await message.answer(
+            "👤 Введите Email агента для поиска:",
+            reply_markup=ReplyKeyboardMarkup(
+                keyboard=[[KeyboardButton(text="❌ Отмена")]],
+                resize_keyboard=True
+            )
+        )
+        logger.info(f"User {message.from_user.id} started searching agent")
+    except Exception as e:
+        logger.error(f"Error in search_agent_start: {e}")
+        await message.answer("❌ Произошла ошибка.", reply_markup=get_main_menu())
+
+
+@dp.message(ClientStates.waiting_for_search_agent)
+async def process_search_agent(message: types.Message, state: FSMContext):
+    """Process search agent input."""
+    try:
+        if message.text == "❌ Отмена":
+            await state.clear()
+            await message.answer("❌ Отменено.", reply_markup=get_main_menu())
+            return
+
+        email = message.text.strip()
+
+        if "@" not in email or "." not in email:
+            await message.answer("⚠️ Пожалуйста, введите корректный email:")
+            return
+
+        await state.clear()
+
+        await message.answer("⏳ Ищу агента...", reply_markup=get_main_menu())
+
+        agent = await google_sheets.get_agent_info(email)
+
+        if agent:
+            clients_list = agent.get('Клиенты', [])
+            clients_text = ""
+            if clients_list:
+                clients_text = "\n\n📋 <b>Клиенты агента:</b>\n"
+                for i, client in enumerate(clients_list, 1):
+                    clients_text += f"{i}. {client.get('Email')} ({client.get('Телефон')})\n"
+
+            await message.answer(
+                f"✅ <b>Агент найден!</b>\n\n"
+                f"👤 Email: {agent.get('Email', 'N/A')}\n"
+                f"📅 Дата регистрации: {agent.get('Дата регистрации', 'N/A')}\n"
+                f"👥 Количество клиентов: {agent.get('Количество клиентов', 0)}"
+                f"{clients_text}",
+                reply_markup=get_main_menu()
+            )
+            logger.info(f"User {message.from_user.id} found agent: {email}")
+        else:
+            await message.answer(
+                f"❌ Агент с email <b>{email}</b> не найден.",
+                reply_markup=get_main_menu()
+            )
+            logger.info(f"User {message.from_user.id} searched for non-existent agent: {email}")
+
+    except Exception as e:
+        logger.error(f"Error in process_search_agent: {e}")
         await state.clear()
         await message.answer(
             f"❌ Произошла ошибка: {str(e)}",

@@ -107,7 +107,7 @@ class GoogleSheetsManager:
         try:
             first_row = self.worksheet.row_values(1)
 
-            headers = ['ID', 'Дата регистрации', 'Телефон', 'Email', 'Процент']
+            headers = ['ID', 'Дата регистрации', 'Email', 'Телефон', 'Процент', 'Роль', 'Агент']
 
             if not first_row or first_row != headers:
                 if first_row:
@@ -176,15 +176,19 @@ class GoogleSheetsManager:
         self,
         phone: str,
         email: str,
-        percentage: float
+        percentage: float,
+        role: str = "Клиент",
+        agent_email: str = ""
     ) -> tuple[bool, str, dict | None]:
         """
-        Add new client to Google Sheets.
+        Add new client/agent to Google Sheets.
 
         Args:
-            phone: Client phone number
-            email: Client email
+            phone: Phone number
+            email: Email
             percentage: Percentage value
+            role: Role (Агент or Клиент)
+            agent_email: Email of agent (for Клиент role)
 
         Returns:
             Tuple of (success: bool, message: str, existing_record: dict or None)
@@ -200,6 +204,17 @@ class GoogleSheetsManager:
                 logger.info(f"Email already exists: {email}")
                 return False, "exists", existing
 
+            # If role is Клиент, verify agent exists
+            if role == "Клиент" and agent_email:
+                agent = await self.find_client_by_email(agent_email)
+                if not agent:
+                    logger.error(f"Agent not found: {agent_email}")
+                    return False, "agent_not_found", None
+                # Check that agent has role Агент
+                if agent.get('Роль', '') != 'Агент':
+                    logger.error(f"Email is not an agent: {agent_email}")
+                    return False, "not_an_agent", None
+
             # Get next ID
             next_id = self._get_next_id()
 
@@ -210,19 +225,63 @@ class GoogleSheetsManager:
             row_data = [
                 next_id,
                 date,
-                str(phone),
                 str(email),
-                str(percentage)
+                str(phone),
+                str(percentage),
+                role,
+                agent_email
             ]
 
             self.worksheet.append_row(row_data)
 
-            logger.info(f"Client added: ID={next_id}, {phone}, {email}, {percentage}%")
+            logger.info(f"Added: ID={next_id}, email={email}, role={role}, agent={agent_email}")
             return True, "success", None
 
         except Exception as e:
             logger.error(f"Error adding client: {e}")
             return False, str(e), None
+
+    async def get_agent_clients(self, agent_email: str) -> list[dict]:
+        """
+        Get all clients of an agent.
+
+        Args:
+            agent_email: Agent email
+
+        Returns:
+            List of client records
+        """
+        try:
+            all_records = await self.get_all_data()
+            clients = [r for r in all_records if r.get('Агент', '').lower() == agent_email.lower()]
+            return clients
+        except Exception as e:
+            logger.error(f"Error getting agent clients: {e}")
+            return []
+
+    async def get_agent_info(self, agent_email: str) -> dict | None:
+        """
+        Get agent info with clients count.
+
+        Args:
+            agent_email: Agent email
+
+        Returns:
+            Agent record with clients info
+        """
+        try:
+            agent = await self.find_client_by_email(agent_email)
+            if not agent or agent.get('Роль', '') != 'Агент':
+                return None
+
+            clients = await self.get_agent_clients(agent_email)
+            agent['Количество клиентов'] = len(clients)
+            agent['Клиенты'] = clients
+
+            return agent
+        except Exception as e:
+            logger.error(f"Error getting agent info: {e}")
+            return None
 
     async def find_client_by_email(self, email: str) -> dict | None:
         """
