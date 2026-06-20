@@ -51,6 +51,15 @@ class AuthorizationMiddleware(BaseMiddleware):
         if hasattr(event, "text") and event.text.startswith("/start"):
             return await handler(event, data)
 
+        # Get state from data
+        state = data.get("state")
+
+        # Allow password input when waiting for password
+        if state:
+            current_state = await state.get_state()
+            if current_state == ClientStates.waiting_for_password:
+                return await handler(event, data)
+
         # Check if user is authorized for other commands
         user_id = event.from_user.id
         is_authorized = await check_authorization(user_id)
