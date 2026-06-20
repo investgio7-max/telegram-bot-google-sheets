@@ -75,17 +75,23 @@ class ExcelGenerator:
             )
 
             for row_num, row_data in enumerate(data, start=2):
-                date_val = row_data.get('Дата', '')
-                phone_val = row_data.get('Телефон', '')
+                id_val = row_data.get('ID', '')
+                date_val = row_data.get('Дата регистрации', '')
                 email_val = row_data.get('Email', '')
+                phone_val = row_data.get('Телефон', '')
                 percentage_val = row_data.get('Процент', '')
+                role_val = row_data.get('Роль', '')
+                agent_val = row_data.get('Агент', '')
 
-                worksheet.cell(row=row_num, column=1, value=date_val)
-                worksheet.cell(row=row_num, column=2, value=phone_val)
+                worksheet.cell(row=row_num, column=1, value=id_val)
+                worksheet.cell(row=row_num, column=2, value=date_val)
                 worksheet.cell(row=row_num, column=3, value=email_val)
-                worksheet.cell(row=row_num, column=4, value=percentage_val)
+                worksheet.cell(row=row_num, column=4, value=phone_val)
+                worksheet.cell(row=row_num, column=5, value=percentage_val)
+                worksheet.cell(row=row_num, column=6, value=role_val)
+                worksheet.cell(row=row_num, column=7, value=agent_val)
 
-                for col_num in range(1, 5):
+                for col_num in range(1, 8):
                     cell = worksheet.cell(row=row_num, column=col_num)
                     cell.border = thin_border
                     cell.alignment = Alignment(
