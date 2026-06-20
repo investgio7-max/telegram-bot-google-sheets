@@ -100,34 +100,34 @@ async def check_authorization(user_id: int) -> bool:
         return False
 
 
-def parse_client_data(text: str) -> tuple[bool, str, str, float, str, str]:
+def parse_user_data(text: str) -> tuple[bool, str, str, float, str]:
     """
-    Parse client/agent data from message in format:
+    Parse user data from message in format:
     email
     phone
     percentage
-    [agent_email]  (optional - if present, it's a client with agent, else it's an agent)
+    [parent_email]  (optional)
 
     Returns:
-        Tuple of (success, email, phone, percentage, role, agent_email)
+        Tuple of (success, email, phone, percentage, parent_email)
     """
     lines = [line.strip() for line in text.strip().split('\n') if line.strip()]
 
     if len(lines) < 3 or len(lines) > 4:
-        return False, '', '', 0.0, '', ''
+        return False, '', '', 0.0, ''
 
     email = lines[0].strip()
     phone = lines[1].strip()
     percentage_text = lines[2].strip()
-    agent_email = lines[3].strip() if len(lines) == 4 else ''
+    parent_email = lines[3].strip() if len(lines) == 4 else ''
 
     # Validate email
     if '@' not in email or '.' not in email:
-        return False, '', '', 0.0, '', ''
+        return False, '', '', 0.0, ''
 
     # Validate phone (not empty)
     if not phone:
-        return False, '', '', 0.0, '', ''
+        return False, '', '', 0.0, ''
 
     # Parse percentage - handle various formats: 3%, 3, 3.0%, 3,0%
     try:
@@ -135,30 +135,21 @@ def parse_client_data(text: str) -> tuple[bool, str, str, float, str, str]:
         percentage = float(percentage_text)
 
         if percentage < 0 or percentage > 100:
-            return False, '', '', 0.0, '', ''
+            return False, '', '', 0.0, ''
     except ValueError:
-        return False, '', '', 0.0, '', ''
+        return False, '', '', 0.0, ''
 
-    # Determine role
-    if agent_email == 'agent':
-        # This is an agent
-        role = 'Агент'
-        agent_email = ''
-    else:
-        # This is a client
-        role = 'Клиент'
-
-    return True, email, phone, percentage, role, agent_email
+    return True, email, phone, percentage, parent_email
 
 
 def get_main_menu() -> ReplyKeyboardMarkup:
     """Create main menu keyboard."""
     keyboard = ReplyKeyboardMarkup(
         keyboard=[
-            [KeyboardButton(text="➕ Добавить клиента")],
-            [KeyboardButton(text="🔍 Найти клиента")],
-            [KeyboardButton(text="👤 Найти агента")],
-            [KeyboardButton(text="📊 Скачать Excel")]
+            [KeyboardButton(text="➕ Добавить пользователя")],
+            [KeyboardButton(text="🔍 Найти пользователя")],
+            [KeyboardButton(text="📊 Структура")],
+            [KeyboardButton(text="📥 Скачать Excel")]
         ],
         resize_keyboard=True
     )
@@ -253,16 +244,22 @@ async def help_command(message: types.Message):
         await message.answer("❌ Произошла ошибка.")
 
 
-@dp.message(lambda message: message.text == "➕ Добавить клиента")
-async def add_client_start(message: types.Message, state: FSMContext):
-    """Start adding new client."""
+@dp.message(lambda message: message.text == "➕ Добавить пользователя")
+async def add_user_start(message: types.Message, state: FSMContext):
+    """Start adding new user."""
     try:
         await state.set_state(ClientStates.waiting_for_client_data)
         await message.answer(
             "📋 Отправьте данные в формате:\n\n"
+            "<b>Без родителя:</b>\n"
             "<code>email\n"
             "телефон\n"
             "процент</code>\n\n"
+            "<b>С родителем:</b>\n"
+            "<code>email\n"
+            "телефон\n"
+            "процент\n"
+            "email_родителя</code>\n\n"
             "<b>Пример:</b>\n"
             "<code>user@gmail.com\n"
             "+33 7 59 87 03 18\n"
@@ -274,15 +271,15 @@ async def add_client_start(message: types.Message, state: FSMContext):
             ),
             parse_mode=ParseMode.HTML
         )
-        logger.info(f"User {message.from_user.id} started adding client")
+        logger.info(f"User {message.from_user.id} started adding user")
     except Exception as e:
-        logger.error(f"Error in add_client_start: {e}")
+        logger.error(f"Error in add_user_start: {e}")
         await message.answer("❌ Произошла ошибка.")
 
 
 @dp.message(ClientStates.waiting_for_client_data)
-async def process_client_data(message: types.Message, state: FSMContext):
-    """Process client/agent data input."""
+async def process_user_data(message: types.Message, state: FSMContext):
+    """Process user data input."""
     try:
         if message.text == "❌ Отмена":
             await state.clear()
@@ -290,21 +287,20 @@ async def process_client_data(message: types.Message, state: FSMContext):
             return
 
         # Parse input
-        success, email, phone, percentage, role, agent_email = parse_client_data(message.text)
+        success, email, phone, percentage, parent_email = parse_user_data(message.text)
 
         if not success:
             await message.answer(
                 "❌ Неверный формат.\n\n"
-                "Для <b>агента</b>:\n"
+                "Без родителя:\n"
+                "<code>email\n"
+                "телефон\n"
+                "процент</code>\n\n"
+                "С родителем:\n"
                 "<code>email\n"
                 "телефон\n"
                 "процент\n"
-                "agent</code>\n\n"
-                "Для <b>клиента</b>:\n"
-                "<code>email\n"
-                "телефон\n"
-                "процент\n"
-                "email_агента</code>",
+                "email_родителя</code>",
                 parse_mode=ParseMode.HTML
             )
             return
@@ -313,32 +309,30 @@ async def process_client_data(message: types.Message, state: FSMContext):
 
         await message.answer("⏳ Сохраняю данные...", reply_markup=get_main_menu())
 
-        success, message_type, existing_record = await google_sheets.add_client(
+        success, message_type, existing_record = await google_sheets.add_user(
             phone=phone,
             email=email,
             percentage=percentage,
-            role=role,
-            agent_email=agent_email
+            parent_email=parent_email
         )
 
         if success:
-            # Get the added record info
-            record = await google_sheets.find_client_by_email(email)
+            # Get the added user info
+            record = await google_sheets.find_user_by_email(email)
             if record:
-                role_text = "Агент" if record.get('Роль') == 'Агент' else "Клиент"
-                agent_info = f"\n👤 Агент: {record.get('Агент', 'N/A')}" if record.get('Агент') else ""
+                parent_info = f"\n👤 Родитель: {record.get('Родитель', 'нет')}" if record.get('Родитель') else "\n👤 Родитель: нет"
 
                 await message.answer(
-                    f"✅ <b>{role_text} успешно добавлен.</b>\n\n"
+                    f"✅ <b>Пользователь успешно добавлен.</b>\n\n"
                     f"🆔 ID: {record.get('ID', 'N/A')}\n"
                     f"📧 Email: {record.get('Email', 'N/A')}\n"
                     f"📱 Телефон: {record.get('Телефон', 'N/A')}\n"
                     f"📊 Процент: {record.get('Процент', 'N/A')}%"
-                    f"{agent_info}\n"
+                    f"{parent_info}\n"
                     f"📅 Дата регистрации: {record.get('Дата регистрации', 'N/A')}",
                     reply_markup=get_main_menu()
                 )
-            logger.info(f"User {message.from_user.id} added {role}: {email}")
+            logger.info(f"User {message.from_user.id} added: {email}")
         elif message_type == "exists":
             await message.answer(
                 f"⚠️ <b>Email уже зарегистрирован.</b>\n\n"
@@ -347,16 +341,10 @@ async def process_client_data(message: types.Message, state: FSMContext):
                 f"📊 Процент: {existing_record.get('Процент', 'N/A')}%",
                 reply_markup=get_main_menu()
             )
-        elif message_type == "agent_not_found":
+        elif message_type == "parent_not_found":
             await message.answer(
-                f"❌ <b>Указанный агент не существует.</b>\n\n"
-                f"Email агента: {agent_email}",
-                reply_markup=get_main_menu()
-            )
-        elif message_type == "not_an_agent":
-            await message.answer(
-                f"❌ <b>Указанный email не является агентом.</b>\n\n"
-                f"Email: {agent_email}",
+                f"❌ <b>Указанный родитель не существует.</b>\n\n"
+                f"Email родителя: {parent_email}",
                 reply_markup=get_main_menu()
             )
         else:
@@ -367,7 +355,7 @@ async def process_client_data(message: types.Message, state: FSMContext):
             )
             logger.error(f"Failed to add for user {message.from_user.id}: {message_type}")
     except Exception as e:
-        logger.error(f"Error in process_client_data: {e}")
+        logger.error(f"Error in process_user_data: {e}")
         await state.clear()
         await message.answer(
             f"❌ Произошла ошибка: {str(e)}",

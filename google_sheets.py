@@ -107,7 +107,7 @@ class GoogleSheetsManager:
         try:
             first_row = self.worksheet.row_values(1)
 
-            headers = ['ID', 'Дата регистрации', 'Email', 'Телефон', 'Процент', 'Роль', 'Агент']
+            headers = ['ID', 'Дата регистрации', 'Email', 'Телефон', 'Процент', 'Родитель']
 
             if not first_row or first_row != headers:
                 if first_row:
@@ -172,23 +172,21 @@ class GoogleSheetsManager:
             logger.error(f"Error checking email: {e}")
             return None
 
-    async def add_client(
+    async def add_user(
         self,
         phone: str,
         email: str,
         percentage: float,
-        role: str = "Клиент",
-        agent_email: str = ""
+        parent_email: str = ""
     ) -> tuple[bool, str, dict | None]:
         """
-        Add new client/agent to Google Sheets.
+        Add new user to Google Sheets.
 
         Args:
             phone: Phone number
             email: Email
             percentage: Percentage value
-            role: Role (Агент or Клиент)
-            agent_email: Email of agent (for Клиент role)
+            parent_email: Email of parent user (optional)
 
         Returns:
             Tuple of (success: bool, message: str, existing_record: dict or None)
@@ -204,16 +202,12 @@ class GoogleSheetsManager:
                 logger.info(f"Email already exists: {email}")
                 return False, "exists", existing
 
-            # If role is Клиент, verify agent exists
-            if role == "Клиент" and agent_email:
-                agent = await self.find_client_by_email(agent_email)
-                if not agent:
-                    logger.error(f"Agent not found: {agent_email}")
-                    return False, "agent_not_found", None
-                # Check that agent has role Агент
-                if agent.get('Роль', '') != 'Агент':
-                    logger.error(f"Email is not an agent: {agent_email}")
-                    return False, "not_an_agent", None
+            # If parent_email specified, verify parent exists
+            if parent_email:
+                parent = await self.find_user_by_email(parent_email)
+                if not parent:
+                    logger.error(f"Parent not found: {parent_email}")
+                    return False, "parent_not_found", None
 
             # Get next ID
             next_id = self._get_next_id()
@@ -228,36 +222,66 @@ class GoogleSheetsManager:
                 str(email),
                 str(phone),
                 str(percentage),
-                role,
-                agent_email
+                parent_email
             ]
 
             self.worksheet.append_row(row_data)
 
-            logger.info(f"Added: ID={next_id}, email={email}, role={role}, agent={agent_email}")
+            logger.info(f"Added user: ID={next_id}, email={email}, parent={parent_email}")
             return True, "success", None
 
         except Exception as e:
-            logger.error(f"Error adding client: {e}")
+            logger.error(f"Error adding user: {e}")
             return False, str(e), None
 
-    async def get_agent_clients(self, agent_email: str) -> list[dict]:
+    async def get_children(self, parent_email: str) -> list[dict]:
         """
-        Get all clients of an agent.
+        Get all child users of a parent.
 
         Args:
-            agent_email: Agent email
+            parent_email: Parent email
 
         Returns:
-            List of client records
+            List of child user records
         """
         try:
             all_records = await self.get_all_data()
-            clients = [r for r in all_records if r.get('Агент', '').lower() == agent_email.lower()]
-            return clients
+            children = [r for r in all_records if r.get('Родитель', '').lower() == parent_email.lower()]
+            return children
         except Exception as e:
-            logger.error(f"Error getting agent clients: {e}")
+            logger.error(f"Error getting children: {e}")
             return []
+
+    async def get_user_tree(self, email: str, indent: str = "") -> str:
+        """
+        Get hierarchical tree of users starting from given email.
+
+        Args:
+            email: Root email
+            indent: Indentation string
+
+        Returns:
+            Formatted tree string
+        """
+        try:
+            user = await self.find_user_by_email(email)
+            if not user:
+                return ""
+
+            tree = f"{indent}{user.get('Email', email)}\n"
+
+            children = await self.get_children(email)
+            for i, child in enumerate(children):
+                is_last = i == len(children) - 1
+                child_indent = indent + ("└── " if is_last else "├── ")
+                next_indent = indent + ("    " if is_last else "│   ")
+                child_tree = await self.get_user_tree(child.get('Email', ''), next_indent)
+                tree += child_tree
+
+            return tree
+        except Exception as e:
+            logger.error(f"Error building user tree: {e}")
+            return ""
 
     async def add_log(self, telegram_id: int, username: str, action: str) -> bool:
         """
@@ -377,44 +401,43 @@ class GoogleSheetsManager:
             logger.error(f"Error adding authorized user: {e}")
             return False
 
-    async def get_agent_info(self, agent_email: str) -> dict | None:
+    async def get_user_info(self, user_email: str) -> dict | None:
         """
-        Get agent info with clients count.
+        Get user info with children count.
 
         Args:
-            agent_email: Agent email
+            user_email: User email
 
         Returns:
-            Agent record with clients info
+            User record with children count
         """
         try:
-            agent = await self.find_client_by_email(agent_email)
-            if not agent or agent.get('Роль', '') != 'Агент':
+            user = await self.find_user_by_email(user_email)
+            if not user:
                 return None
 
-            clients = await self.get_agent_clients(agent_email)
-            agent['Количество клиентов'] = len(clients)
-            agent['Клиенты'] = clients
+            children = await self.get_children(user_email)
+            user['Количество приглашённых пользователей'] = len(children)
 
-            return agent
+            return user
         except Exception as e:
-            logger.error(f"Error getting agent info: {e}")
+            logger.error(f"Error getting user info: {e}")
             return None
 
-    async def find_client_by_email(self, email: str) -> dict | None:
+    async def find_user_by_email(self, email: str) -> dict | None:
         """
-        Find client by email (case-insensitive).
+        Find user by email (case-insensitive).
 
         Args:
-            email: Client email to search
+            email: User email to search
 
         Returns:
-            Dictionary with client data or None
+            Dictionary with user data or None
         """
         try:
             return await self.email_exists(email)
         except Exception as e:
-            logger.error(f"Error finding client: {e}")
+            logger.error(f"Error finding user: {e}")
             return None
 
     async def get_all_data(self) -> List[Dict[str, str]]:
